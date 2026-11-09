@@ -214,7 +214,7 @@ df_tampil = df_tampil.dropna(subset=['last_update'])
 df_tampil = df_tampil[(df_tampil['last_update'] >= start_dt) & (df_tampil['last_update'] <= end_dt)]
 
 # ==========================================
-# 5. ANTARMUKA UTAMA (LAYAR KANAN)
+# 5. ANTARMUKA UTAMA & PENGATURAN KOLOM
 # ==========================================
 st.title("📊 Monitoring Tabel se-Kalimantan Barat")
 
@@ -225,31 +225,38 @@ with col_btn:
 with col_metric:
     st.write(f"<h4 style='margin-top:5px; color:#4a4a4a;'>Total Tabel Ditemukan: {len(df_tampil)} baris</h4>", unsafe_allow_html=True)
 
+# Susun urutan kolom: Kode Wilayah dipindah ke paling kiri, lalu Judul, lalu Link
+urutan_kolom = ['kode_wilayah', 'title', 'Link', 'tablesource', 'oldest_period', 'latest_period', 'last_update']
+sisa_kolom = [col for col in df.columns if col not in urutan_kolom]
+semua_kolom = urutan_kolom + sisa_kolom
+
 with st.expander("🛠️ Pengaturan Tampilan Kolom"):
-    semua_kolom = df.columns.tolist()
     kolom_disembunyikan = ['id', 'id_subject', 'subject', 'id_subcat', 'subcat_name']
     kolom_default = [k for k in semua_kolom if k not in kolom_disembunyikan]
     kolom_dipilih = st.multiselect("Pilih Kolom Tabel yang Ditampilkan:", semua_kolom, default=kolom_default)
 
 if kolom_dipilih:
-    df_tampil = df_tampil[kolom_dipilih]
+    df_tampil_final = df_tampil[kolom_dipilih]
 else:
-    df_tampil = pd.DataFrame()
+    df_tampil_final = pd.DataFrame()
 
+# ==========================================
+# 6. RENDER TABEL UTAMA
+# ==========================================
 st.dataframe(
-    df_tampil,
+    df_tampil_final,
     column_config={
-        "Link": st.column_config.LinkColumn("Akses Tabel", display_text="Buka Tautan"),
-        "title": st.column_config.TextColumn("Judul Tabel"),
-        "oldest_period": st.column_config.TextColumn("Tahun Awal"),
-        "latest_period": st.column_config.TextColumn("Tahun Terakhir"),
         "kode_wilayah": st.column_config.TextColumn("Kode Wilayah"),
-        "last_update": st.column_config.DatetimeColumn("Terakhir Diperbarui", format="YYYY-MM-DD HH:mm:ss"),
+        "title": st.column_config.TextColumn("Judul Tabel", width="large"),
+        "Link": st.column_config.LinkColumn("Tautan", display_text="🔗 Buka"),
         "tablesource": st.column_config.NumberColumn(
             "Kode Tabel", 
             help="1 = Tabel Statis, 2 = Tabel Dinamis, 3 = Tabel SIMDASI",
             format="%d"
-        )
+        ),
+        "oldest_period": st.column_config.TextColumn("Tahun Awal"),
+        "latest_period": st.column_config.TextColumn("Tahun Terakhir"),
+        "last_update": st.column_config.DatetimeColumn("Terakhir Diperbarui", format="YYYY-MM-DD HH:mm:ss")
     },
     width="stretch",
     hide_index=True
