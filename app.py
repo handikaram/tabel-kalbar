@@ -3,15 +3,26 @@ import pandas as pd
 import requests
 import datetime
 import re
+import os
 
 # ==========================================
 # 1. KONFIGURASI HALAMAN & STATE
 # ==========================================
-st.set_page_config(page_title="Monitoring Tabel BPS", layout="wide")
+st.set_page_config(page_title="Monitoring Tabel BPS Kalbar", layout="wide")
 API_KEY = st.secrets["BPS_API_KEY"]
+CACHE_FILE = "cache_bps_kalbar.parquet"
 
+# Load cache dari file jika session_state masih kosong
 if 'df_master' not in st.session_state:
-    st.session_state.df_master = pd.DataFrame()
+    if os.path.exists(CACHE_FILE):
+        try:
+            df_loaded = pd.read_parquet(CACHE_FILE)
+            df_loaded['last_update'] = pd.to_datetime(df_loaded['last_update'], errors='coerce')
+            st.session_state.df_master = df_loaded
+        except Exception:
+            st.session_state.df_master = pd.DataFrame()
+    else:
+        st.session_state.df_master = pd.DataFrame()
 
 # Inisialisasi Memori Filter Waktu
 if 'start_d' not in st.session_state:
@@ -23,7 +34,6 @@ if 'start_t' not in st.session_state:
 if 'end_t' not in st.session_state:
     st.session_state.end_t = datetime.time(23, 59)
 
-# Fungsi Tombol Waktu
 def set_start_to_today():
     st.session_state.start_d = datetime.date.today()
     st.session_state.start_t = datetime.time(0, 0)
@@ -48,28 +58,15 @@ def buat_link_tabel(row):
     title = str(row.get('title', ''))
     kode_wil = str(row.get('kode_wilayah', '6100'))
     
-    # Kamus pemetaan subdomain wilayah BPS se-Kalimantan Barat
     subdomain_map = {
-        '6100': 'kalbar',
-        '6101': 'sambaskab',
-        '6102': 'bengkayangkab',
-        '6103': 'landakkab',
-        '6104': 'mempawahkab',
-        '6105': 'sanggaukab',
-        '6106': 'ketapangkab',
-        '6107': 'sintangkab',
-        '6108': 'kapuashulukab',
-        '6109': 'sekadaukab',
-        '6110': 'melawikab',
-        '6111': 'kayongutarakab',
-        '6112': 'kuburayakab',
-        '6171': 'pontianakkota',
-        '6172': 'singkawangkota'
+        '6100': 'kalbar', '6101': 'sambaskab', '6102': 'bengkayangkab',
+        '6103': 'landakkab', '6104': 'mempawahkab', '6105': 'sanggaukab',
+        '6106': 'ketapangkab', '6107': 'sintangkab', '6108': 'kapuashulukab',
+        '6109': 'sekadaukab', '6110': 'melawikab', '6111': 'kayongutarakab',
+        '6112': 'kuburayakab', '6171': 'pontianakkota', '6172': 'singkawangkota'
     }
     
-    # Ambil subdomain sesuai kode wilayah, default ke 'kalbar'
     subdomain = subdomain_map.get(kode_wil, 'kalbar')
-    
     title_bersih = re.sub(r'[^a-zA-Z0-9]', '-', title.lower())
     base_url = f"https://{subdomain}.bps.go.id/id/statistics-table/{tbl_source}/{tbl_id}/{title_bersih}.html"
     
@@ -116,8 +113,7 @@ def dialog_tarik_data():
                     data = res.json()
                     if len(data["data"]) > 1 and isinstance(data["data"][1], list):
                         df_temp = pd.DataFrame(data["data"][1])
-                        # Pastikan format kode konsisten agar dictionary map berfungsi
-                        df_temp["kode_wilayah"] = str(kode) 
+                        df_temp["kode_wilayah"] = str(kode)
                         df_list.append(df_temp)
                 
                 total_langkah = len(wilayah_dipilih) * total_pages
@@ -129,6 +125,7 @@ def dialog_tarik_data():
             df_new['Link'] = df_new.apply(buat_link_tabel, axis=1)
             df_new['last_update'] = pd.to_datetime(df_new['last_update'], errors='coerce')
             
+            # Logika menggantikan (overwrite) wilayah yang sama
             if st.session_state.df_master.empty:
                 st.session_state.df_master = df_new
             else:
@@ -136,12 +133,18 @@ def dialog_tarik_data():
                 df_existing = df_existing[~df_existing['kode_wilayah'].isin([str(w) for w in wilayah_dipilih])]
                 st.session_state.df_master = pd.concat([df_existing, df_new], ignore_index=True)
             
-            # Otomatis set tanggal ke yang paling tua
+            # SIMPAN OTOMATIS KE FILE KOTA LOKAL (PARQUET)
+            try:
+                st.session_state.df_master.to_parquet(CACHE_FILE, index=False)
+            except Exception as e:
+                # Fallback ke CSV jika pyarrow belum terinstall
+                st.session_state.df_master.to_csv("cache_bps_kalbar.csv", index=False)
+
             min_date = st.session_state.df_master['last_update'].min()
             if pd.notna(min_date):
                 st.session_state.start_d = min_date.date()
                 
-            st.success("Berhasil ditarik dan diperbarui!")
+            st.success("Berhasil ditarik, diperbarui, dan disimpan ke cache lokal!")
             st.rerun()
 
 # ==========================================
@@ -159,6 +162,16 @@ df = st.session_state.df_master.copy()
 with st.sidebar:
     st.title("⚙️ Pengaturan Filter")
     
+    # Tombol Hapus Cache File jika ingin reset total
+    if st.button("🗑️ Hapus Cache Data", help="Membersihkan file cache dan mereset data"):
+        if os.path.exists(CACHE_FILE):
+            os.remove(CACHE_FILE)
+        if os.path.exists("cache_bps_kalbar.csv"):
+            os.remove("cache_bps_kalbar.csv")
+        st.session_state.df_master = pd.DataFrame()
+        st.rerun()
+
+    st.markdown("---")
     st.markdown("### 1. Filter Kategori")
     opsi_wil = sorted(df['kode_wilayah'].unique())
     f_wilayah = st.multiselect("Kode Wilayah", opsi_wil, default=opsi_wil)
@@ -176,7 +189,6 @@ with st.sidebar:
     st.markdown("### 2. Pencarian Judul & Waktu")
     f_title = st.text_input("Cari Judul Tabel (Ketik kata...)", placeholder="Misal: penduduk, PDB")
     
-    # Filter Mulai
     st.write("**Mulai Dari:**")
     st.date_input("Tanggal Mulai", key="start_d")
     st.time_input("Jam Mulai", key="start_t")
@@ -186,12 +198,11 @@ with st.sidebar:
     with col_today_start: st.button("📅 Hari Ini", on_click=set_start_to_today, use_container_width=True, key="btn_start_today")
 
     st.markdown("")
-    
-    # Filter Selesai
     st.write("**Sampai Dengan:**")
     st.date_input("Tanggal Selesai", key="end_d")
-    st.time_input("Jam Selesai", key="end_t")
-    st.button("📅 Hari Ini", on_click=set_end_to_today, use_container_width=True, key="btn_end_today")
+    col_t2, col_b2 = st.columns([2, 1])
+    with col_t2: st.time_input("Jam Selesai", key="end_t")
+    with col_b2: st.button("📅 Hari Ini", on_click=set_end_to_today, key="btn_end_today")
 
 # ==========================================
 # 4. TERAPKAN FILTER KE DATAFRAME
@@ -225,8 +236,7 @@ with col_btn:
 with col_metric:
     st.write(f"<h4 style='margin-top:5px; color:#4a4a4a;'>Total Tabel Ditemukan: {len(df_tampil)} baris</h4>", unsafe_allow_html=True)
 
-# Susun urutan kolom: Kode Wilayah dipindah ke paling kiri, lalu Judul, lalu Link
-urutan_kolom = ['kode_wilayah', 'title', 'Link', 'tablesource', 'oldest_period', 'latest_period', 'last_update']
+urutan_kolom = ['kode_wilayah', 'title', 'Link', 'oldest_period', 'latest_period', 'last_update', 'tablesource']
 sisa_kolom = [col for col in df.columns if col not in urutan_kolom]
 semua_kolom = urutan_kolom + sisa_kolom
 
@@ -249,14 +259,14 @@ st.dataframe(
         "kode_wilayah": st.column_config.TextColumn("Kode Wilayah"),
         "title": st.column_config.TextColumn("Judul Tabel", width="large"),
         "Link": st.column_config.LinkColumn("Tautan", display_text="🔗 Buka"),
+        "oldest_period": st.column_config.TextColumn("Tahun Awal"),
+        "latest_period": st.column_config.TextColumn("Tahun Terakhir"),
+        "last_update": st.column_config.DatetimeColumn("Terakhir Diperbarui", format="YYYY-MM-DD HH:mm:ss"),
         "tablesource": st.column_config.NumberColumn(
             "Kode Tabel", 
             help="1 = Tabel Statis, 2 = Tabel Dinamis, 3 = Tabel SIMDASI",
             format="%d"
-        ),
-        "oldest_period": st.column_config.TextColumn("Tahun Awal"),
-        "latest_period": st.column_config.TextColumn("Tahun Terakhir"),
-        "last_update": st.column_config.DatetimeColumn("Terakhir Diperbarui", format="YYYY-MM-DD HH:mm:ss")
+        )
     },
     width="stretch",
     hide_index=True
