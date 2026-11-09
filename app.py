@@ -26,7 +26,16 @@ if 'df_master' not in st.session_state:
 
 # Inisialisasi Memori Filter Waktu
 if 'start_d' not in st.session_state:
-    st.session_state.start_d = datetime.date.today()
+    # PERBAIKAN: Jika ada data cache, otomatis jadikan tanggal paling tua sebagai default
+    if not st.session_state.df_master.empty:
+        min_date = st.session_state.df_master['last_update'].min()
+        if pd.notna(min_date):
+            st.session_state.start_d = min_date.date()
+        else:
+            st.session_state.start_d = datetime.date.today()
+    else:
+        st.session_state.start_d = datetime.date.today()
+
 if 'end_d' not in st.session_state:
     st.session_state.end_d = datetime.date.today()
 if 'start_t' not in st.session_state:
