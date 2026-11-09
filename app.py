@@ -26,7 +26,6 @@ if 'df_master' not in st.session_state:
 
 # Inisialisasi Memori Filter Waktu
 if 'start_d' not in st.session_state:
-    # PERBAIKAN: Jika ada data cache, otomatis jadikan tanggal paling tua sebagai default
     if not st.session_state.df_master.empty:
         min_date = st.session_state.df_master['last_update'].min()
         if pd.notna(min_date):
@@ -134,7 +133,6 @@ def dialog_tarik_data():
             df_new['Link'] = df_new.apply(buat_link_tabel, axis=1)
             df_new['last_update'] = pd.to_datetime(df_new['last_update'], errors='coerce')
             
-            # Logika menggantikan (overwrite) wilayah yang sama
             if st.session_state.df_master.empty:
                 st.session_state.df_master = df_new
             else:
@@ -142,11 +140,9 @@ def dialog_tarik_data():
                 df_existing = df_existing[~df_existing['kode_wilayah'].isin([str(w) for w in wilayah_dipilih])]
                 st.session_state.df_master = pd.concat([df_existing, df_new], ignore_index=True)
             
-            # SIMPAN OTOMATIS KE FILE KOTA LOKAL (PARQUET)
             try:
                 st.session_state.df_master.to_parquet(CACHE_FILE, index=False)
-            except Exception as e:
-                # Fallback ke CSV jika pyarrow belum terinstall
+            except Exception:
                 st.session_state.df_master.to_csv("cache_bps_kalbar.csv", index=False)
 
             min_date = st.session_state.df_master['last_update'].min()
@@ -171,7 +167,6 @@ df = st.session_state.df_master.copy()
 with st.sidebar:
     st.title("⚙️ Pengaturan Filter")
     
-    # Tombol Hapus Cache File jika ingin reset total
     if st.button("🗑️ Hapus Cache Data", help="Membersihkan file cache dan mereset data"):
         if os.path.exists(CACHE_FILE):
             os.remove(CACHE_FILE)
@@ -182,6 +177,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### 1. Filter Kategori")
+    
     opsi_wil = sorted(df['kode_wilayah'].unique())
     f_wilayah = st.multiselect("Kode Wilayah", opsi_wil, default=opsi_wil)
     
@@ -195,9 +191,18 @@ with st.sidebar:
     f_tbl = st.multiselect("Kode Tabel (tablesource)", opsi_tbl)
     
     st.markdown("---")
-    st.markdown("### 2. Pencarian Judul & Waktu")
-    f_title = st.text_input("Cari Judul Tabel (Ketik kata...)", placeholder="Misal: penduduk, PDB")
+    st.markdown("### 2. Pencarian Judul dan Priode Data")
     
+    f_title = st.text_input("Cari Judul Tabel", placeholder="Ketik kata... misal: penduduk")
+    
+    # FILTER BARU: Tahun Awal & Tahun Akhir sebagai Text Input
+    f_oldest = st.text_input("Cari Tahun Awal (oldest_period)", placeholder="Ketik tahun... misal: 2010")
+    f_latest = st.text_input("Cari Tahun Akhir (latest_period)", placeholder="Ketik tahun... misal: 2024")
+    
+    st.markdown("---")
+    st.markdown("### 3. Pencarian Last Updated")
+
+    st.markdown("")
     st.write("**Mulai Dari:**")
     st.date_input("Tanggal Mulai", key="start_d")
     st.time_input("Jam Mulai", key="start_t")
@@ -225,8 +230,15 @@ if f_subject: df_tampil = df_tampil[df_tampil['subject'].isin(f_subject)]
 if f_subcat: df_tampil = df_tampil[df_tampil['subcat_name'].isin(f_subcat)]
 if f_tbl: df_tampil = df_tampil[df_tampil['tablesource'].isin(f_tbl)]
 
+# TERAPKAN LOGIKA FILTER TEKS
 if f_title:
     df_tampil = df_tampil[df_tampil['title'].str.contains(f_title, case=False, na=False)]
+
+# Fungsi str.contains digunakan agar angka yang diketik bisa langsung memfilter
+if f_oldest: 
+    df_tampil = df_tampil[df_tampil['oldest_period'].astype(str).str.contains(f_oldest, case=False, na=False)]
+if f_latest: 
+    df_tampil = df_tampil[df_tampil['latest_period'].astype(str).str.contains(f_latest, case=False, na=False)]
 
 start_dt = pd.to_datetime(f"{st.session_state.start_d} {st.session_state.start_t}")
 end_dt = pd.to_datetime(f"{st.session_state.end_d} {st.session_state.end_t}")
