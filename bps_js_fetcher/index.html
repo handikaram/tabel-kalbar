@@ -1,0 +1,67 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <script>
+        function sendMessageToStreamlit(type, data) {
+            var outData = Object.assign({
+                isStreamlitMessage: true,
+                type: type,
+            }, data);
+            window.parent.postMessage(outData, "*");
+        }
+
+        function init() {
+            sendMessageToStreamlit("setFrameHeight", {height: 0}); // Sembunyikan iframe
+        }
+
+        async function fetchData(args) {
+            const apiKey = args.api_key;
+            const wilayahList = args.wilayah_list;
+            let allData = [];
+            
+            try {
+                for (let i = 0; i < wilayahList.length; i++) {
+                    let kode = wilayahList[i];
+                    let baseUrl = `https://webapi.bps.go.id/v1/api/list/domain/${kode}/model/tablestatistic/page/1/perpage/100/key/${apiKey}/`;
+                    
+                    let res = await fetch(baseUrl);
+                    if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
+                    
+                    let json = await res.json();
+                    if (!json.data || !json.data[0]) throw new Error(`Data metadata ${kode} kosong/salah API Key`);
+                    let totalPages = json.data[0].pages;
+                    
+                    for (let p = 1; p <= totalPages; p++) {
+                        let pageUrl = `https://webapi.bps.go.id/v1/api/list/domain/${kode}/model/tablestatistic/page/${p}/perpage/100/key/${apiKey}/`;
+                        let pRes = await fetch(pageUrl);
+                        let pJson = await pRes.json();
+                        
+                        if (pJson.data && pJson.data.length > 1 && Array.isArray(pJson.data[1])) {
+                            let pageData = pJson.data[1];
+                            pageData.forEach(item => item.kode_wilayah = String(kode));
+                            allData = allData.concat(pageData);
+                        }
+                    }
+                }
+                // Kirim hasil kembali ke Python Streamlit
+                sendMessageToStreamlit("setComponentValue", {value: {status: "success", data: allData}});
+            } catch (err) {
+                sendMessageToStreamlit("setComponentValue", {value: {status: "error", message: err.toString()}});
+            }
+        }
+
+        function onDataFromStreamlit(event) {
+            if (event.data.type !== "send_message_to_component") return;
+            var args = event.data.command === "render" ? event.data.args : null;
+            if (args && args.action === "fetch") {
+                fetchData(args);
+            }
+        }
+
+        window.addEventListener("message", onDataFromStreamlit);
+        window.addEventListener("load", init);
+    </script>
+</head>
+<body></body>
+</html>

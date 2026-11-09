@@ -23,10 +23,17 @@ if 'start_t' not in st.session_state:
 if 'end_t' not in st.session_state:
     st.session_state.end_t = datetime.time(23, 59)
 
-# Fungsi Tombol Today
+# Fungsi Tombol Waktu
 def set_start_to_today():
     st.session_state.start_d = datetime.date.today()
     st.session_state.start_t = datetime.time(0, 0)
+
+def set_start_to_oldest():
+    if not st.session_state.df_master.empty:
+        min_date = st.session_state.df_master['last_update'].min()
+        if pd.notna(min_date):
+            st.session_state.start_d = min_date.date()
+            st.session_state.start_t = datetime.time(0, 0)
 
 def set_end_to_today():
     st.session_state.end_d = datetime.date.today()
@@ -39,9 +46,32 @@ def buat_link_tabel(row):
     tbl_source = str(row.get('tablesource', ''))
     tbl_id = str(row.get('id', ''))
     title = str(row.get('title', ''))
+    kode_wil = str(row.get('kode_wilayah', '6100'))
+    
+    # Kamus pemetaan subdomain wilayah BPS se-Kalimantan Barat
+    subdomain_map = {
+        '6100': 'kalbar',
+        '6101': 'sambaskab',
+        '6102': 'bengkayangkab',
+        '6103': 'landakkab',
+        '6104': 'mempawahkab',
+        '6105': 'sanggaukab',
+        '6106': 'ketapangkab',
+        '6107': 'sintangkab',
+        '6108': 'kapuashulukab',
+        '6109': 'sekadaukab',
+        '6110': 'melawikab',
+        '6111': 'kayongutarakab',
+        '6112': 'kuburayakab',
+        '6171': 'pontianakkota',
+        '6172': 'singkawangkota'
+    }
+    
+    # Ambil subdomain sesuai kode wilayah, default ke 'kalbar'
+    subdomain = subdomain_map.get(kode_wil, 'kalbar')
     
     title_bersih = re.sub(r'[^a-zA-Z0-9]', '-', title.lower())
-    base_url = f"https://kalbar.bps.go.id/id/statistics-table/{tbl_source}/{tbl_id}/{title_bersih}.html"
+    base_url = f"https://{subdomain}.bps.go.id/id/statistics-table/{tbl_source}/{tbl_id}/{title_bersih}.html"
     
     if tbl_source == '3':
         latest_period = row.get('latest_period')
@@ -86,7 +116,8 @@ def dialog_tarik_data():
                     data = res.json()
                     if len(data["data"]) > 1 and isinstance(data["data"][1], list):
                         df_temp = pd.DataFrame(data["data"][1])
-                        df_temp["kode_wilayah"] = kode
+                        # Pastikan format kode konsisten agar dictionary map berfungsi
+                        df_temp["kode_wilayah"] = str(kode) 
                         df_list.append(df_temp)
                 
                 total_langkah = len(wilayah_dipilih) * total_pages
@@ -102,10 +133,10 @@ def dialog_tarik_data():
                 st.session_state.df_master = df_new
             else:
                 df_existing = st.session_state.df_master
-                df_existing = df_existing[~df_existing['kode_wilayah'].isin(wilayah_dipilih)]
+                df_existing = df_existing[~df_existing['kode_wilayah'].isin([str(w) for w in wilayah_dipilih])]
                 st.session_state.df_master = pd.concat([df_existing, df_new], ignore_index=True)
             
-            # Set default filter tanggal mulai ke data paling tua
+            # Otomatis set tanggal ke yang paling tua
             min_date = st.session_state.df_master['last_update'].min()
             if pd.notna(min_date):
                 st.session_state.start_d = min_date.date()
@@ -116,7 +147,6 @@ def dialog_tarik_data():
 # ==========================================
 # 3. SIDEBAR (PANEL KIRI UNTUK FILTER)
 # ==========================================
-# Jika data belum ada, hentikan program lebih awal di layar utama
 if st.session_state.df_master.empty:
     st.title("📊 Monitoring Tabel se-Kalimantan Barat")
     st.info("Tabel masih kosong. Silakan klik tombol 'Tarik Data' di bawah ini.")
@@ -149,16 +179,19 @@ with st.sidebar:
     # Filter Mulai
     st.write("**Mulai Dari:**")
     st.date_input("Tanggal Mulai", key="start_d")
-    col_t1, col_b1 = st.columns([2, 1])
-    with col_t1: st.time_input("Jam Mulai", key="start_t")
-    with col_b1: st.button("Hari Ini", on_click=set_start_to_today, key="btn_start")
+    st.time_input("Jam Mulai", key="start_t")
+    
+    col_oldest, col_today_start = st.columns(2)
+    with col_oldest: st.button("⏪ Oldest", on_click=set_start_to_oldest, use_container_width=True, key="btn_start_oldest")
+    with col_today_start: st.button("📅 Hari Ini", on_click=set_start_to_today, use_container_width=True, key="btn_start_today")
 
+    st.markdown("")
+    
     # Filter Selesai
     st.write("**Sampai Dengan:**")
     st.date_input("Tanggal Selesai", key="end_d")
-    col_t2, col_b2 = st.columns([2, 1])
-    with col_t2: st.time_input("Jam Selesai", key="end_t")
-    with col_b2: st.button("Hari Ini", on_click=set_end_to_today, key="btn_end")
+    st.time_input("Jam Selesai", key="end_t")
+    st.button("📅 Hari Ini", on_click=set_end_to_today, use_container_width=True, key="btn_end_today")
 
 # ==========================================
 # 4. TERAPKAN FILTER KE DATAFRAME
@@ -194,7 +227,6 @@ with col_metric:
 
 with st.expander("🛠️ Pengaturan Tampilan Kolom"):
     semua_kolom = df.columns.tolist()
-    # Menambahkan 'id' ke dalam kolom yang disembunyikan secara default
     kolom_disembunyikan = ['id', 'id_subject', 'subject', 'id_subcat', 'subcat_name']
     kolom_default = [k for k in semua_kolom if k not in kolom_disembunyikan]
     kolom_dipilih = st.multiselect("Pilih Kolom Tabel yang Ditampilkan:", semua_kolom, default=kolom_default)
